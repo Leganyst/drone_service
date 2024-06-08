@@ -1,14 +1,15 @@
-from fastapi import APIRouter, Response, Depends
+from fastapi import APIRouter, File, UploadFile, HTTPException
 from pydantic import BaseModel, Field
-from typing import List 
+from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
 from db.database import engine
 from db.models import DataDroneORM
 
-from datetime import datetime, timezone
 from app.config import clients
+
+import os
 
 data = APIRouter()
 
@@ -22,6 +23,8 @@ class DataDrone(BaseModel):
     time: str = Field(..., description='Время, представленное в виде строки вида дд.гг.чч чч:мм:сс', example="16.05.2024 18:43:34")
     latitude: float = Field(..., description='Широта', example=55.7522)
     longitude: float = Field(..., description='Долгота', example=37.6156)
+    photo_path: Optional[str] = Field(None, description='Путь к сохраненной фотографии с дрона')
+
 
 # @data.post("/api/data", tags= ["Информация от дрона"], response_model=DataDrone, response_description="Данные от дрона")
 # def post_data(data: DataDrone, response: Response):
@@ -67,9 +70,46 @@ async def post_data(data: DataDrone):
             "latitude": data_orm.latitude,
             "longitude": data_orm.longitude
         }
+    return data
+
+
+@data.post(
+    "/api/data/photo",
+    tags=["Информация от дрона"],
+    summary="Отправить фото от дрона",
+    description="Этот API принимает фото от дрона и сохраняет его на сервере. Путь к фотографии затем сохраняется в базе данных.",
+    operation_id="post_drone_photo",
+    responses={
+        200: {"description": "Успешный ответ"},
+        400: {"description": "Неверный запрос"},
+        500: {"description": "Внутренняя ошибка сервера"},
+    },
+)
+async def post_photo(photo: UploadFile = File(...)):
+    with Session(engine) as session:
+        data_orm = session.query(DataDroneORM).order_by(desc(DataDroneORM.time)).first()
+        if not data_orm:
+            raise HTTPException(status_code=400, detail="No data available to attach the photo")
+        contents = await photo.read()
+        file_name = f"{data_orm.id}.jpg"
+        file_path = os.path.join("images", file_name)
+        with open(file_path, "wb") as f:
+            f.write(contents)
+        data_orm.image_path = file_path
+        session.commit()
+
+        # Отправляем обновления через WebSocket после сохранения фотографии
+        data_dict = {
+            "time": data_orm.time.strftime("%d.%m.%Y %H:%M:%S"),
+            "latitude": data_orm.latitude,
+            "longitude": data_orm.longitude,
+            "photo_url": f"/images/{file_name}"
+        }
         for client in clients:
             await client.send_json(data_dict)
-    return data
+
+    return {"photo_url": f"/images/{file_name}"}
+
 
 @data.get("/api/data", response_model=List[DataDrone], tags=["Информация от дрона"], summary="Получить данные от дрона")
 async def get_data():
@@ -84,7 +124,8 @@ async def get_data():
             DataDrone(
                 time=d.time.strftime("%d.%m.%Y %H:%M:%S"),
                 latitude=d.latitude,
-                longitude=d.longitude
+                longitude=d.longitude,
+                photo_path=d.image_path
             )
             for d in data
         ]

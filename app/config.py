@@ -5,6 +5,17 @@ import os
 
 app = FastAPI()
 templates = Jinja2Templates(directory=os.path.join(os.getcwd(), "app", "templates"))
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+
+app = FastAPI()
+
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+if not os.path.exists('images'):
+    os.makedirs('images')
+app.mount("/images", StaticFiles(directory="images"), name="images")
+
 clients = []
 
 class Config:

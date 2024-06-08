@@ -44,7 +44,11 @@ th, td {
 
 th {
     background-color: #f2f2f2;
-    position: sticky;
     top: 40px; /* Отступ для заголовка h1 */
     z-index: 5;
 }
+
+thead {
+    position: sticky;
+    top: 0;
+    }
