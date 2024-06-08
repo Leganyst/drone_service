@@ -3,23 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fire Monitoring</title>
+    <title>Fire Monitoring Dashboard</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <h1>Fire Monitoring Dashboard</h1>
-    <div id="log">
-        <!-- Логи будут добавляться сюда -->
+    <h1 id="header">Fire Monitoring Dashboard</h1>
+    <div class="table-container">
+        <table id="data-table">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Latitude</th>
+                    <th>Longitude</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Данные будут добавляться сюда -->
+            </tbody>
+        </table>
     </div>
-    <script>
-        const log = document.getElementById('log');
-        const socket = new WebSocket('ws://localhost:8000/ws');
-
-        socket.onmessage = function(event) {
-            const message = document.createElement('div');
-            message.textContent = event.data;
-            log.appendChild(message);
-        };
-    </script>
+    <script src="/static/script.js"></script>
 </body>
 </html>

@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Response
-from influxdb_client import Point, WritePrecision
+from fastapi import APIRouter, Response, Depends
 from pydantic import BaseModel, Field
 from typing import List 
+from sqlalchemy.orm import Session
+from sqlalchemy import desc
 
-from db.bucket import write_api, query_api
+from db.database import engine
+from db.models import DataDroneORM
 
 from datetime import datetime, timezone
-from influxdb_client import InfluxDBClient
+from app.config import clients
 
 data = APIRouter()
 
@@ -17,62 +19,72 @@ class DataDrone(BaseModel):
     и время отправки данных. Изображение должно по логике отправляться на соответствующий сервер с хранением
     различных данных, но в данной интерпретации мы будем его сохранять на той же машине.
     """
-    time: str = Field(..., description='Время, представленное в виде строки вида дд-гг-чч чч:мм:сс', example="16.05.2024 18:43:34")
+    time: str = Field(..., description='Время, представленное в виде строки вида дд.гг.чч чч:мм:сс', example="16.05.2024 18:43:34")
     latitude: float = Field(..., description='Широта', example=55.7522)
     longitude: float = Field(..., description='Долгота', example=37.6156)
 
-@data.post("/api/data", tags= ["Информация от дрона"], response_model=DataDrone, response_description="Данные от дрона")
-def post_data(data: DataDrone, response: Response):
-    """
-    Принимает данные от дрона по модели DataDrone и сохраняет их в influx
-    """
-    # Создание точки для записи в Influx 
-    point = Point("drone_data")\
-        .field("drone_time", data.time)\
-        .field("latitude", data.latitude)\
-        .field("longitude", data.longitude)\
-        .time(datetime.now(timezone.utc), WritePrecision.NS)
-    
-    # Непосредственно запись
-    write_api.write(bucket="drone", record=point)
-    return data
+# @data.post("/api/data", tags= ["Информация от дрона"], response_model=DataDrone, response_description="Данные от дрона")
+# def post_data(data: DataDrone, response: Response):
+#     """
+#     Принимает данные от дрона по модели DataDrone и сохраняет их в БД (Постгрес)
+#     """
+#     with Session(engine) as session:
+#         data_orm = DataDroneORM(time=datetime.strptime(data.time, "%d.%m.%Y %H:%M:%S"), latitude=data.latitude, longitude=data.longitude)
+#         # Добавляем в сессию
+#         session.add(data_orm)
+#         # Сохраняем
+#         session.commit()
+
+#     return data
 
 
-@data.get(
-    "/api/data", 
-    tags=["Информация от дрона"], 
-    response_model=List[DataDrone],
-    summary="Получить данные от дрона",
-    description="Этот API возвращает список данных, полученных от дрона. Каждый элемент списка представляет собой объект DataDrone, который содержит время, широту и долготу.",
-    response_description="Список объектов DataDrone",
-    operation_id="get_drone_data",
+@data.post(
+    "/api/data",
+    tags=["Информация от дрона"],
+    response_model=DataDrone,
+    summary="Отправить данные от дрона",
+    description="Этот API принимает данные от дрона в виде объекта DataDrone, который содержит время, широту и долготу. Данные сохраняются в базе данных и отправляются всем подключенным клиентам через веб-сокеты.",
+    response_description="Объект DataDrone, который был сохранен в базе данных и отправлен через веб-сокеты",
+    operation_id="post_drone_data",
     responses={
         200: {"description": "Успешный ответ"},
         400: {"description": "Неверный запрос"},
         500: {"description": "Внутренняя ошибка сервера"},
     },
 )
-def get_data():
-    """
-    Возвращает все данные, которые были отправлены дроном
-    """
-    # Формируем запрос, что к чему откуда
-    query = 'from(bucket: "drone") |> range(start: -1d)'
-    result = query_api.query(query=query)
-    
-    # Наш результат
-    data = []
-    # Просматриваем все полученные ответы
-    for table in result:
-        # Для каждой записи из всех
-        for record in table.records:
-            # Получаем время
-            time = record.get_field("drone_time")
-            # Получаем поля
-            latitude = record.get_field("latitude")
-            longitude = record.get_field("longitude")
-            # Добавляем в список объект DataDrone с указанными параметрами
-            data.append(DataDrone(time=time, latitude=latitude, longitude=longitude))
-    
+async def post_data(data: DataDrone):
+    data_orm = DataDroneORM(
+        time=data.time,
+        latitude=data.latitude,
+        longitude=data.longitude
+    )
+    with Session(engine) as session:
+        session.add(data_orm)
+        session.commit()
+        session.refresh(data_orm)
+        data_dict = {
+            "time": data_orm.time.strftime("%d.%m.%Y %H:%M:%S"),
+            "latitude": data_orm.latitude,
+            "longitude": data_orm.longitude
+        }
+        for client in clients:
+            await client.send_json(data_dict)
     return data
- 
+
+@data.get("/api/data", response_model=List[DataDrone], tags=["Информация от дрона"], summary="Получить данные от дрона")
+async def get_data():
+    """
+    Получает данные о дронах, отсортированные по времени в порядке убывания.
+
+    :return: Список объектов DataDrone, содержащих информацию о сообщениях дрона(ов).
+    """
+    with Session(engine) as session:
+        data = session.query(DataDroneORM).order_by(desc(DataDroneORM.time)).all()
+        return [
+            DataDrone(
+                time=d.time.strftime("%d.%m.%Y %H:%M:%S"),
+                latitude=d.latitude,
+                longitude=d.longitude
+            )
+            for d in data
+        ]
