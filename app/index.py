@@ -16,3 +16,4 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         await clients.remove(websocket)
+
