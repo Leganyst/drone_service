@@ -46,7 +46,7 @@ async function fetchData() {
         if (item.photo_path) {
             const photoLink = document.createElement('a');
             photoLink.href = item.photo_path;
-            photoLink.textContent = 'View photo';
+            photoLink.textContent = 'Посмотреть фото';
             photoCell.appendChild(photoLink);
         }
 
