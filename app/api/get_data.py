@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException
+from fastapi import APIRouter, File, UploadFile, HTTPException, status
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from sqlalchemy.orm import Session
@@ -114,7 +114,30 @@ async def post_photo(photo: UploadFile = File(...)):
     return {"photo_url": f"/images/{file_name}"}
 
 
-@data.get("/api/data", response_model=List[DataDrone], tags=["Информация от дрона"], summary="Получить данные от дрона")
+@data.get("/api/data", response_model=List[DataDrone], tags=["Информация от дрона"], summary="Получить данные от дрона",
+          responses={
+              status.HTTP_200_OK: {
+                  "description": "Список данных от дронов, отсортированных по времени в порядке убывания",
+                  "content": {
+                      "application/json": {
+                          "example": [
+                              {
+                                  "time": "01.01.2022 12:00:00",
+                                  "latitude": 50.4501,
+                                  "longitude": 30.5234,
+                                  "photo_path": "/images/1.jpg"
+                              },
+                              {
+                                  "time": "01.01.2022 12:05:00",
+                                  "latitude": 50.4502,
+                                  "longitude": 30.5235,
+                                  "photo_path": "/images/2.jpg"
+                              }
+                          ]
+                      }
+                  }
+              }
+          })
 async def get_data():
     """
     Получает данные от дронов, отсортированные по времени в порядке убывания.
