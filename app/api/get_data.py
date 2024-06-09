@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
+from datetime import datetime
 
 from db.database import engine
 from db.models import DataDroneORM
@@ -19,6 +20,9 @@ class DataDrone(BaseModel):
     Подразумевается, что дрон будет отправлять координаты (Ширина и долгота)
     и время отправки данных. Изображение должно по логике отправляться на соответствующий сервер с хранением
     различных данных, но в данной интерпретации мы будем его сохранять на той же машине.
+    
+    ВАЖНО - для отправки данных photo_path не требуется. Данное поле используется при отправке данных на фронт для отображения
+    возможности загрузки фотографии
     """
     time: str = Field(..., description='Время, представленное в виде строки вида дд.гг.чч чч:мм:сс', example="16.05.2024 18:43:34")
     latitude: float = Field(..., description='Широта', example=55.7522)
@@ -46,18 +50,17 @@ class DataDrone(BaseModel):
     tags=["Информация от дрона"],
     response_model=DataDrone,
     summary="Отправить данные от дрона",
-    description="Этот API принимает данные от дрона в виде объекта DataDrone, который содержит время, широту и долготу. Данные сохраняются в базе данных и отправляются всем подключенным клиентам через веб-сокеты.",
+    description="Эта ручка ВЫПОЛНЯЕТСЯ ПЕРВОЙ В ОБЯЗАТЕЛЬНОМ ПОРЯДКЕ, принимает данные от дрона в виде объекта DataDrone, который содержит время, широту и долготу. Данные сохраняются в базе данных и ожидают первый запрос, который пришлёт фотографию.",
     response_description="Объект DataDrone, который был сохранен в базе данных и отправлен через веб-сокеты",
     operation_id="post_drone_data",
     responses={
-        200: {"description": "Успешный ответ"},
         400: {"description": "Неверный запрос"},
         500: {"description": "Внутренняя ошибка сервера"},
     },
 )
 async def post_data(data: DataDrone):
     data_orm = DataDroneORM(
-        time=data.time,
+        time=datetime.strptime(data.time, "%d.%m.%Y %H:%M:%S"),
         latitude=data.latitude,
         longitude=data.longitude
     )
@@ -77,7 +80,7 @@ async def post_data(data: DataDrone):
     "/api/data/photo",
     tags=["Информация от дрона"],
     summary="Отправить фото от дрона",
-    description="Этот API принимает фото от дрона и сохраняет его на сервере. Путь к фотографии затем сохраняется в базе данных.",
+    description="Эта ручка ВЫПОЛНЯЕТСЯ ВТОРОЙ и принимает фото от дрона и сохраняет его на сервере прикрепляя к последнему полученом json. Путь к фотографии затем сохраняется в базе данных.",
     operation_id="post_drone_photo",
     responses={
         200: {"description": "Успешный ответ"},
@@ -114,9 +117,7 @@ async def post_photo(photo: UploadFile = File(...)):
 @data.get("/api/data", response_model=List[DataDrone], tags=["Информация от дрона"], summary="Получить данные от дрона")
 async def get_data():
     """
-    Получает данные о дронах, отсортированные по времени в порядке убывания.
-
-    :return: Список объектов DataDrone, содержащих информацию о сообщениях дрона(ов).
+    Получает данные от дронов, отсортированные по времени в порядке убывания.
     """
     with Session(engine) as session:
         data = session.query(DataDroneORM).order_by(desc(DataDroneORM.time)).all()
